@@ -112,17 +112,16 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
         totalpages = doc:getPageCount()
     end
 
-    -- Book progress 0-1 (used for bar sentinel)
+    -- Book progress 0-1
     local book_pct_raw = 0
     if type(currentpage) == "number" and type(totalpages) == "number" and totalpages > 0 then
         book_pct_raw = math.max(0, math.min(1, currentpage / totalpages))
     end
 
-    -- Book percentage text token — always from raw page numbers (his fix)
+    -- Book percentage (text token)
     local percent = ""
-    local raw_total = doc:getPageCount()
-    if pageno and raw_total and raw_total > 0 then
-        percent = math.floor(pageno / raw_total * 100) .. "%"
+    if type(currentpage) == "number" and type(totalpages) == "number" and totalpages > 0 then
+        percent = math.floor(currentpage / totalpages * 100) .. "%"
     end
 
     -- Chapter tick marks as fractions of the book
@@ -233,11 +232,14 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
     end
 
     -- Frontlight brightness (%Fl)
+    -- Returns raw intensity as a percentage, or "Off" if frontlight is off/unavailable.
     local frontlight_lvl = ""
     if Device:hasFrontlight() then
         if powerd:isFrontlightOn() then
             local intensity = powerd:frontlightIntensity()
             if intensity and intensity > 0 then
+                -- Kobo/Cervantes report as percentage directly; others are raw.
+                -- We display as-is since KOReader itself does the same in the footer.
                 frontlight_lvl = intensity .. "%"
             else
                 frontlight_lvl = "Off"
@@ -248,6 +250,7 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
     end
 
     -- Frontlight warmth (%Fw)
+    -- Returns warmth as a percentage, or "Off" if not on or unavailable.
     local frontlight_warmth = ""
     if Device:hasNaturalLight() then
         if powerd:isFrontlightOn() then
@@ -285,6 +288,7 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
     end
 
     local replace = {
+        -- Page/Progress
         ["%c"] = tostring(currentpage),
         ["%t"] = tostring(totalpages),
         ["%p"] = tostring(percent),
@@ -293,6 +297,7 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
         ["%G"] = tostring(chapter_total_pages),
         ["%l"] = tostring(chapter_pages_left),
         ["%L"] = tostring(pages_left_book),
+        -- Time/Reading
         ["%h"] = tostring(time_left_chapter),
         ["%H"] = tostring(time_left_doc),
         ["%k"] = time_12h,
@@ -304,14 +309,17 @@ function Tokens.expand(format_str, ui, session_start_time, session_pages_read, p
         ["%a"] = date_weekday_short,
         ["%R"] = session_time,
         ["%s"] = tostring(session_pages),
+        -- Metadata
         ["%T"] = tostring(title),
         ["%A"] = tostring(authors),
         ["%S"] = tostring(series),
         ["%C"] = tostring(chapter_title),
+        -- Device
         ["%b"] = tostring(batt_lvl),
         ["%B"] = tostring(batt_symbol),
         ["%W"] = wifi_symbol,
         ["%m"] = tostring(mem_usage),
+        -- Frontlight
         ["%Fl"] = tostring(frontlight_lvl),
         ["%Fw"] = tostring(frontlight_warmth),
     }
