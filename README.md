@@ -15,6 +15,10 @@ A [KOReader](https://github.com/koreader/koreader) plugin that merges and extend
 - 📊 **Progress Bars** — visual reading progress indicators
 - 🌟 **Brightness & Warmth Tokens** — support for brightness and warmth display tokens
 
+## 📸 Screenshots
+
+<img src="screenshots/ss1.png" width="300"/>
+
 ## 📦 Installation
 
 1. Download or clone this repository
