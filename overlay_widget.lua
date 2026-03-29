@@ -79,9 +79,7 @@ end
 
 function BarWidget:free() end
 
--- ─── HorizontalRowWidget ──────────────────────────────────────────────────────
--- Paints a list of segments (text or bar) left to right.
--- Each segment is vertically centred within the row height.
+-- ─── HorizontalRowWidget ──────��───────────────────────────────────────────────
 
 local HorizontalRowWidget = {}
 HorizontalRowWidget.__index = HorizontalRowWidget
@@ -114,8 +112,6 @@ function HorizontalRowWidget:free()
 end
 
 -- ─── MultiLineWidget ──────────────────────────────────────────────────────────
--- Stacks rows vertically. Each row is either a TextWidget, BarWidget,
--- or HorizontalRowWidget.
 
 local MultiLineWidget = {}
 MultiLineWidget.__index = MultiLineWidget
@@ -183,34 +179,34 @@ local function buildBarWidget(info, bar_w, bar_h)
     }
 end
 
--- bar_manual_width == 0 or nil → auto (caller supplies the resolved width)
--- bar_manual_width > 0         → exact pixel value
 local function resolveBarWidth(cfg, full_available_w, screen_w)
     local mw = cfg.bar_manual_width
     if mw and mw > 0 then
-        return math.max(4, mw), false  -- false = not auto
+        return math.max(4, mw), false
     end
-    return math.max(4, full_available_w or screen_w or Screen:getWidth()), true  -- true = auto
+    return math.max(4, full_available_w or screen_w or Screen:getWidth()), true
 end
 
--- Build a HorizontalRowWidget from an ordered list of segments on one line.
--- segments: list of { kind="text", text=... } or { kind="bar", info=... }
--- cfg: line config (face, bold, bar_height, bar_manual_width)
--- full_available_w: uncapped slot width for 0px bar resolution
--- max_width: text truncation limit (nil = none)
--- screen_w: fallback
+-- Apply uppercase to a string if cfg.uppercase is set
+local function applyCase(text, cfg)
+    if cfg and cfg.uppercase then
+        return text:upper()
+    end
+    return text
+end
+
 local function buildHorizontalRow(segments, cfg, full_available_w, max_width, screen_w)
     local bar_h = cfg.bar_height or 8
 
-    -- First pass: build text widgets, identify auto-width bars
-    local built   = {}
-    local used_w  = 0
+    local built          = {}
+    local used_w         = 0
     local auto_bar_count = 0
 
     for _, seg in ipairs(segments) do
         if seg.kind == "text" and seg.text ~= "" then
+            local display = applyCase(seg.text, cfg)
             local tw = TextWidget:new(textWidgetOpts{
-                text                   = seg.text,
+                text                   = display,
                 face                   = cfg.face,
                 bold                   = cfg.bold,
                 max_width              = max_width,
@@ -222,21 +218,17 @@ local function buildHorizontalRow(segments, cfg, full_available_w, max_width, sc
         elseif seg.kind == "bar" then
             local mw = cfg.bar_manual_width
             if mw and mw > 0 then
-                -- Fixed width bar — build now
                 local bw  = math.max(4, mw)
                 local bar = buildBarWidget(seg.info, bw, bar_h)
                 table.insert(built, { kind = "bar", widget = bar, w = bw, h = bar_h })
                 used_w = used_w + bw
             else
-                -- Auto width bar — placeholder, resolve after measuring text
                 table.insert(built, { kind = "bar_auto", info = seg.info, w = 0, h = bar_h })
                 auto_bar_count = auto_bar_count + 1
             end
         end
-        -- empty text segments are skipped
     end
 
-    -- Second pass: resolve auto-width bars equally from remaining space
     if auto_bar_count > 0 then
         local remaining = math.max(4, (full_available_w or screen_w or Screen:getWidth()) - used_w)
         local each      = math.max(4, math.floor(remaining / auto_bar_count))
@@ -250,7 +242,6 @@ local function buildHorizontalRow(segments, cfg, full_available_w, max_width, sc
         end
     end
 
-    -- Compute row dimensions
     local total_w = 0
     local row_h   = 0
     for _, entry in ipairs(built) do
@@ -270,14 +261,6 @@ end
 
 -- ─── Public API ───────────────────────────────────────────────────────────────
 
---- Build a widget for a possibly multi-line, possibly bar-containing string.
---
--- @param text          expanded string (may contain bar sentinels)
--- @param line_configs  array of per-source-line configs
--- @param h_anchor      "left"|"center"|"right"
--- @param max_width     number|nil  text truncation cap
--- @param available_w   number|nil  slot width capped by overlap prevention
--- @param screen_w      number|nil  full uncapped slot width (for 0px bar resolution)
 function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, available_w, screen_w)
     screen_w = screen_w or Screen:getWidth()
 
@@ -288,7 +271,7 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
     local function getConfig(i)
         return line_configs[i] or line_configs[#line_configs]
                or { face = nil, bold = false, v_nudge = 0, h_nudge = 0,
-                    bar_height = 8, bar_manual_width = nil }
+                    bar_height = 8, bar_manual_width = nil, uppercase = false }
     end
 
     local align = "center"
@@ -297,9 +280,10 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
 
     -- Fast path: single plain text line
     if #lines == 1 and not Tokens.lineHasBar(lines[1]) then
-        local cfg = getConfig(1)
-        local tw  = TextWidget:new(textWidgetOpts{
-            text                   = lines[1],
+        local cfg     = getConfig(1)
+        local display = applyCase(lines[1], cfg)
+        local tw = TextWidget:new(textWidgetOpts{
+            text                   = display,
             face                   = cfg.face,
             bold                   = cfg.bold,
             max_width              = max_width,
@@ -318,7 +302,7 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
         return row, rw, rh
     end
 
-    -- Multi-line: build each line, stack vertically
+    -- Multi-line
     local line_entries = {}
     local max_w        = 0
     local total_h      = 0
@@ -338,12 +322,13 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
                     v_nudge = cfg.v_nudge or 0,
                     h_nudge = cfg.h_nudge or 0,
                 })
-                if rw > max_w  then max_w  = rw end
+                if rw > max_w then max_w = rw end
                 total_h = total_h + rh
             end
         else
+            local display = applyCase(line, cfg)
             local tw = TextWidget:new(textWidgetOpts{
-                text                   = line,
+                text                   = display,
                 face                   = cfg.face,
                 bold                   = cfg.bold,
                 max_width              = max_width,
@@ -374,7 +359,6 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
     return mlw, reported_w, total_h
 end
 
---- Measure the pixel width of the widest text-only line (bars excluded).
 function OverlayWidget.measureTextWidth(text, line_configs)
     local max_w = 0
     local i     = 0
@@ -382,9 +366,10 @@ function OverlayWidget.measureTextWidth(text, line_configs)
         i = i + 1
         if not Tokens.lineHasBar(line) then
             local cfg = line_configs[i] or line_configs[#line_configs]
-                        or { face = nil, bold = false }
+                        or { face = nil, bold = false, uppercase = false }
+            local display = cfg.uppercase and line:upper() or line
             local tw = TextWidget:new(textWidgetOpts{
-                text = line,
+                text = display,
                 face = cfg.face,
                 bold = cfg.bold,
             })
@@ -396,7 +381,6 @@ function OverlayWidget.measureTextWidth(text, line_configs)
     return max_w
 end
 
---- Calculate max_width for each position in a row, applying overlap prevention.
 function OverlayWidget.calculateRowLimits(left_w, center_w, right_w, screen_w, gap, h_offset)
     local limits = { left = nil, center = nil, right = nil }
 
@@ -435,7 +419,6 @@ function OverlayWidget.calculateRowLimits(left_w, center_w, right_w, screen_w, g
     return limits
 end
 
---- Compute the (x, y) paint coordinates for a widget.
 function OverlayWidget.computeCoordinates(h_anchor, v_anchor, text_w, text_h,
                                           screen_w, screen_h, v_offset, h_offset)
     local x, y
@@ -454,7 +437,6 @@ function OverlayWidget.computeCoordinates(h_anchor, v_anchor, text_w, text_h,
     return x, y
 end
 
---- Free all widgets in a cache table.
 function OverlayWidget.freeWidgets(widget_cache)
     local keys = {}
     for key in pairs(widget_cache) do table.insert(keys, key) end

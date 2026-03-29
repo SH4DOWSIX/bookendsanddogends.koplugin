@@ -106,11 +106,7 @@ function Bookends:loadSettings()
     end
 end
 
--- ─── Dogear scanning ─────────────────────────────────────
-
-function Bookends:getDogearPluginDir()
-    return self.path .. "/icons"
-end
+-- ─── Dogear scanning ────���────────────────────────────────
 
 function Bookends:getDogearUserDir()
     return DataStorage:getDataDir() .. "/icons/dogears"
@@ -131,7 +127,6 @@ function Bookends:scanDogearDesigns()
             end
         end
     end
-    scan(self:getDogearPluginDir())
     scan(self:getDogearUserDir())
     table.sort(designs, function(a, b) return a.text < b.text end)
     return designs
@@ -262,6 +257,7 @@ function Bookends:resetDogear()
     G_reader_settings:delSetting(DOGEAR_S_MARGIN_R)
     self:applyDogearToLive()
 end
+
 -- ─── Preset support ──────────────────────────────────────
 
 function Bookends:buildPreset()
@@ -389,7 +385,6 @@ function Bookends:paintTo(bb, x, y)
     local session_pages = math.max(0,
         (self.session_max_page or 0) - (self.session_start_page or 0))
 
-    -- Phase 1: Expand tokens
     local expanded = {}
     for _, pos in ipairs(self.POSITIONS) do
         if self:isPositionActive(pos.key) then
@@ -399,7 +394,6 @@ function Bookends:paintTo(bb, x, y)
         end
     end
 
-    -- Phase 2: Cache check
     if not self.dirty then
         local changed = false
         for key, text in pairs(expanded) do
@@ -419,7 +413,6 @@ function Bookends:paintTo(bb, x, y)
         end
     end
 
-    -- Phase 3: Build per-line configs and measure
     local measurements = {}
     for key, text in pairs(expanded) do
         local ps            = self.positions[key]
@@ -430,14 +423,15 @@ function Bookends:paintTo(bb, x, y)
 
         local line_configs = {}
         for i = 1, #ps.lines do
-            local face   = (ps.line_font_face        and ps.line_font_face[i])        or default_face
-            local fsize  = (ps.line_font_size        and ps.line_font_size[i])        or default_size
-            local style  = (ps.line_style            and ps.line_style[i])            or "regular"
-            local bar_h  = (ps.line_bar_height       and ps.line_bar_height[i])       or default_bar_h
-            local bar_mw = (ps.line_bar_manual_width and ps.line_bar_manual_width[i]) or nil
-            local cfg    = self:resolveLineConfig(face, fsize, style, bar_h, bar_mw)
-            cfg.v_nudge  = (ps.line_v_nudge and ps.line_v_nudge[i]) or 0
-            cfg.h_nudge  = (ps.line_h_nudge and ps.line_h_nudge[i]) or 0
+            local face    = (ps.line_font_face        and ps.line_font_face[i])        or default_face
+            local fsize   = (ps.line_font_size        and ps.line_font_size[i])        or default_size
+            local style   = (ps.line_style            and ps.line_style[i])            or "regular"
+            local bar_h   = (ps.line_bar_height       and ps.line_bar_height[i])       or default_bar_h
+            local bar_mw  = (ps.line_bar_manual_width and ps.line_bar_manual_width[i]) or nil
+            local cfg     = self:resolveLineConfig(face, fsize, style, bar_h, bar_mw)
+            cfg.v_nudge   = (ps.line_v_nudge   and ps.line_v_nudge[i])   or 0
+            cfg.h_nudge   = (ps.line_h_nudge   and ps.line_h_nudge[i])   or 0
+            cfg.uppercase = (ps.line_uppercase and ps.line_uppercase[i]) or false
             table.insert(line_configs, cfg)
         end
 
@@ -445,7 +439,6 @@ function Bookends:paintTo(bb, x, y)
         measurements[key] = { width = w, line_configs = line_configs }
     end
 
-    -- Phase 4: Overlap limits and build widget cache
     local gap = self.defaults.overlap_gap
     if self.widget_cache then OverlayWidget.freeWidgets(self.widget_cache) end
     self.widget_cache = {}
@@ -522,11 +515,12 @@ function Bookends:onCloseWidget()
         self.widget_cache = nil
     end
 end
--- ─── Menu ─────��──────────────────────────────────────────
+
+-- ─── Menu ────────────────────────────────────────────────
 
 function Bookends:addToMainMenu(menu_items)
     menu_items.bookends_and_dogends = {
-        text = _("Bookends and Dogends"),
+        text           = _("Bookends and Dogends"),
         sorting_hint   = "typeset",
         sub_item_table = self:buildMainMenu(),
     }
@@ -562,7 +556,8 @@ function Bookends:buildMainMenu()
         })
     end
 
-    table.insert(menu, SEP)
+    -- separator after positions
+    menu[#menu].separator = true
 
     table.insert(menu, {
         text         = _("Default font"),
@@ -650,13 +645,132 @@ function Bookends:buildMainMenu()
     table.insert(menu, {
         text                = _("Presets"),
         enabled_func        = function() return self.enabled end,
-        sub_item_table_func = function()
-            local Presets = require("ui/presets")
-            return Presets.genPresetMenuItemTable(self.preset_obj)
-        end,
+        sub_item_table_func = function() return self:buildPresetsMenu() end,
     })
 
     return menu
+end
+
+-- ─── Built-in presets ────────────────────────────────────
+
+Bookends.BUILT_IN_PRESETS = {
+    {
+        name = _("Minimal"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = {} },
+                tr = { lines = {} },
+                bl = { lines = {} },
+                bc = { lines = { "Page %c of %t" }, line_font_size = { [1] = 16 }, v_offset = 35 },
+                br = { lines = {} },
+            },
+        },
+    },
+    {
+        name = _("Full status"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = { "%A \xE2\x8B\xAE %T" }, line_font_size = { [1] = 12 } },
+                tc = { lines = { "%k \xC2\xB7 %a %d" }, line_font_size = { [1] = 14 }, line_style = { [1] = "bold" } },
+                tr = { lines = { "%C" }, line_style = { [1] = "bold" } },
+                bl = { lines = { "\xE2\x8F\xB3 %R session" }, v_offset = 16 },
+                bc = { lines = { "Page %c of %t" }, line_font_size = { [1] = 16 }, v_offset = 35 },
+                br = { lines = { "%B %W" }, line_font_size = { [1] = 10 }, v_offset = 14 },
+            },
+        },
+    },
+    {
+        name = _("Book info"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = { "%T", "%A" }, line_style = { [1] = "bold", [2] = "italic" }, line_font_size = { [2] = 11 } },
+                tr = { lines = {} },
+                bl = { lines = {} },
+                bc = { lines = { "%c / %t (%p)" }, v_offset = 35 },
+                br = { lines = {} },
+            },
+        },
+    },
+    {
+        name = _("Chapter focus"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = { "%C" }, line_style = { [1] = "bold" } },
+                tr = { lines = {} },
+                bl = { lines = { "%g / %G (%P)" } },
+                bc = { lines = { "Page %c of %t" }, v_offset = 35 },
+                br = { lines = { "%h left" } },
+            },
+        },
+    },
+    {
+        name = _("Token test"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = { "%T", "%A", "%S", "%C" },
+                       line_font_size = { [1]=10,[2]=10,[3]=10,[4]=10 } },
+                tc = { lines = { "%k \xC2\xB7 %K", "%d \xC2\xB7 %D", "%n \xC2\xB7 %w \xC2\xB7 %a" },
+                       line_font_size = { [1]=10,[2]=10,[3]=10 } },
+                tr = { lines = { "%B %b \xC2\xB7 %W", "%m" },
+                       line_font_size = { [1]=10,[2]=10 } },
+                bl = { lines = { "%R session \xC2\xB7 %s pages", "%h ch \xC2\xB7 %H book" },
+                       line_font_size = { [1]=10,[2]=10 }, v_offset = 16 },
+                bc = { lines = { "Page %c of %t (%p)" },
+                       line_font_size = { [1]=10 }, v_offset = 35 },
+                br = { lines = { "Ch: %g/%G (%P)", "Left: %l ch \xC2\xB7 %L book" },
+                       line_font_size = { [1]=10,[2]=10 }, v_offset = 14 },
+            },
+        },
+    },
+}
+
+function Bookends:buildPresetsMenu()
+    local Presets    = require("ui/presets")
+    local InfoMessage = require("ui/widget/infomessage")
+    local T          = require("ffi/util").template
+
+    local items = Presets.genPresetMenuItemTable(self.preset_obj)
+
+    local builtin_items = {
+        {
+            text         = "\xE2\x94\x80\xE2\x94\x80 " .. _("Built-in") .. " \xE2\x94\x80\xE2\x94\x80",
+            enabled_func = function() return false end,
+        },
+    }
+    for _, bp in ipairs(self.BUILT_IN_PRESETS) do
+        table.insert(builtin_items, {
+            text           = bp.name,
+            keep_menu_open = true,
+            callback       = function()
+                self:loadPreset(bp.preset)
+                UIManager:show(InfoMessage:new{
+                    text    = T(_("Preset '%1' loaded."), bp.name),
+                    timeout = 2,
+                })
+            end,
+        })
+    end
+
+    for i = #builtin_items, 1, -1 do
+        table.insert(items, 2, builtin_items[i])
+    end
+
+    if #self.preset_obj.presets > 0 or next(self.preset_obj.presets) then
+        table.insert(items, 2 + #builtin_items, {
+            text         = "\xE2\x94\x80\xE2\x94\x80 " .. _("Your presets") .. " \xE2\x94\x80\xE2\x94\x80",
+            enabled_func = function() return false end,
+        })
+    end
+
+    return items
 end
 
 -- ─── Dogear menu ─────────────────────────────────────────
@@ -760,9 +874,7 @@ function Bookends:buildDogearIconMenu()
 
     if #designs == 0 then
         table.insert(menu, {
-            text = _("No designs found — place images in:") .. " " ..
-                   self:getDogearPluginDir() .. " " .. _("or") .. " " ..
-                   self:getDogearUserDir(),
+            text         = _("No designs found — place images in:") .. " " .. self:getDogearUserDir(),
             enabled_func = function() return false end,
         })
     else
@@ -808,16 +920,15 @@ function Bookends:buildPositionMenu(pos)
     end
 
     table.insert(menu, {
-        text     = _("Add line"),
+        text     = "+ " .. _("Add line"),
         callback = function()
             local idx = #self.positions[pos.key].lines + 1
             table.insert(self.positions[pos.key].lines, "")
             self:savePositionSetting(pos.key)
             self:editLineString(pos, idx)
         end,
+        separator = true,
     })
-
-    table.insert(menu, SEP)
 
     table.insert(menu, {
         text_func = function()
@@ -871,6 +982,7 @@ function Bookends:buildPositionMenu(pos)
 
     return menu
 end
+
 -- ─── Line editing ────────────────────────────────────────
 
 function Bookends:editLineString(pos, line_idx)
@@ -879,7 +991,6 @@ function Bookends:editLineString(pos, line_idx)
     local pos_settings = self.positions[pos.key]
     local current_text = pos_settings.lines[line_idx] or ""
 
-    -- Ensure all per-line arrays exist
     pos_settings.line_style            = pos_settings.line_style            or {}
     pos_settings.line_font_size        = pos_settings.line_font_size        or {}
     pos_settings.line_font_face        = pos_settings.line_font_face        or {}
@@ -887,16 +998,18 @@ function Bookends:editLineString(pos, line_idx)
     pos_settings.line_h_nudge          = pos_settings.line_h_nudge          or {}
     pos_settings.line_bar_height       = pos_settings.line_bar_height       or {}
     pos_settings.line_bar_manual_width = pos_settings.line_bar_manual_width or {}
+    pos_settings.line_uppercase        = pos_settings.line_uppercase        or {}
 
     local original_settings = util.tableDeepCopy(pos_settings)
 
-    local line_style   = pos_settings.line_style[line_idx]            or "regular"
-    local line_size    = pos_settings.line_font_size[line_idx]
-    local line_face    = pos_settings.line_font_face[line_idx]
-    local line_v_nudge = pos_settings.line_v_nudge[line_idx]          or 0
-    local line_h_nudge = pos_settings.line_h_nudge[line_idx]          or 0
-    local line_bar_h   = pos_settings.line_bar_height[line_idx]
-    local line_bar_mw  = pos_settings.line_bar_manual_width[line_idx] or 0
+    local line_style    = pos_settings.line_style[line_idx]            or "regular"
+    local line_size     = pos_settings.line_font_size[line_idx]
+    local line_face     = pos_settings.line_font_face[line_idx]
+    local line_v_nudge  = pos_settings.line_v_nudge[line_idx]          or 0
+    local line_h_nudge  = pos_settings.line_h_nudge[line_idx]          or 0
+    local line_bar_h    = pos_settings.line_bar_height[line_idx]
+    local line_bar_mw   = pos_settings.line_bar_manual_width[line_idx] or 0
+    local line_uppercase = pos_settings.line_uppercase[line_idx]       or false
 
     local nudge_step = 1
 
@@ -908,6 +1021,7 @@ function Bookends:editLineString(pos, line_idx)
         pos_settings.line_h_nudge[line_idx]          = line_h_nudge ~= 0 and line_h_nudge or nil
         pos_settings.line_bar_height[line_idx]       = line_bar_h
         pos_settings.line_bar_manual_width[line_idx] = line_bar_mw ~= 0 and line_bar_mw or nil
+        pos_settings.line_uppercase[line_idx]        = line_uppercase or nil
         self:savePositionSetting(pos.key)
         self:markDirty()
     end
@@ -965,6 +1079,15 @@ function Bookends:editLineString(pos, line_idx)
         end,
     }
 
+    local case_button = {
+        text_func = function() return line_uppercase and "AA" or "Aa" end,
+        callback  = function()
+            line_uppercase = not line_uppercase
+            applyLivePreview()
+            format_dialog:reinit()
+        end,
+    }
+
     local bar_h_button = {
         text_func = function()
             return _("Bar h") .. ": " ..
@@ -1016,7 +1139,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_v_nudge = line_v_nudge - nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_down = {
@@ -1024,7 +1147,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_v_nudge = line_v_nudge + nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_left = {
@@ -1032,7 +1155,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_h_nudge = line_h_nudge - nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_right = {
@@ -1040,7 +1163,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_h_nudge = line_h_nudge + nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_label = {
@@ -1050,8 +1173,8 @@ function Bookends:editLineString(pos, line_idx)
         end,
         callback = function()
             format_dialog:onCloseKeyboard()
-            line_v_nudge = 0 ; line_h_nudge = 0
-            applyLivePreview() ; format_dialog:reinit()
+            line_v_nudge = 0; line_h_nudge = 0
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
 
@@ -1059,6 +1182,7 @@ function Bookends:editLineString(pos, line_idx)
         "line_style", "line_font_size", "line_font_face",
         "line_v_nudge", "line_h_nudge",
         "line_bar_height", "line_bar_manual_width",
+        "line_uppercase",
     }
 
     local function removeLineArrayEntries()
@@ -1080,7 +1204,7 @@ function Bookends:editLineString(pos, line_idx)
             end
         end,
         buttons = {
-            { style_button, size_button, font_button, bar_h_button, bar_mw_button },
+            { style_button, size_button, font_button, case_button, bar_h_button, bar_mw_button },
             { nudge_left, nudge_right, nudge_label, nudge_up, nudge_down },
             {
                 {
@@ -1135,6 +1259,7 @@ function Bookends:editLineString(pos, line_idx)
     UIManager:show(format_dialog)
     format_dialog:onShowKeyboard()
 end
+
 -- ─── Line manage dialog (hold) ───────────────────────────
 
 function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
@@ -1146,6 +1271,7 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
         "line_style", "line_font_size", "line_font_face",
         "line_v_nudge", "line_h_nudge",
         "line_bar_height", "line_bar_manual_width",
+        "line_uppercase",
     }
 
     local function refreshMenu()
@@ -1175,6 +1301,21 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
         refreshMenu()
     end
 
+    local function moveToRegion(target_key)
+        local target = self.positions[target_key]
+        target.lines = target.lines or {}
+        for _, arr in ipairs(ARRAYS) do
+            target[arr] = target[arr] or {}
+        end
+        local ti = #target.lines + 1
+        target.lines[ti] = ps.lines[line_idx]
+        for _, arr in ipairs(ARRAYS) do
+            target[arr][ti] = ps[arr] and ps[arr][line_idx] or nil
+        end
+        removeLine()
+        self:savePositionSetting(target_key)
+    end
+
     local other_buttons = {}
     if line_idx > 1 then
         table.insert(other_buttons, {
@@ -1185,6 +1326,14 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
         table.insert(other_buttons, {
             { text = _("Move down"), callback = function() swapLines(line_idx, line_idx + 1) end },
         })
+    end
+
+    for _, p in ipairs(self.POSITIONS) do
+        if p.key ~= pos.key then
+            table.insert(other_buttons, {
+                { text = _("Move to") .. " " .. p.label, callback = function() moveToRegion(p.key) end },
+            })
+        end
     end
 
     UIManager:show(ConfirmBox:new{
