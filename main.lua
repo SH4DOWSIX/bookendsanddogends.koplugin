@@ -13,20 +13,56 @@ local OverlayWidget = require("overlay_widget")
 local InputDialog = require("ui/widget/inputdialog")
 local SpinWidget = require("ui/widget/spinwidget")
 
+-- ─── Sparse table helpers ─────────────────────────────────────────────────────
+
+--- Remove an index from a sparse table, shifting higher indices down.
+local function sparseRemove(tbl, idx)
+    if not tbl then return end
+    local max_idx = 0
+    for k in pairs(tbl) do
+        if type(k) == "number" and k > max_idx then max_idx = k end
+    end
+    for i = idx, max_idx do
+        tbl[i] = tbl[i + 1]
+    end
+end
+
+--- Truncate a string to max_bytes, avoiding splitting multi-byte UTF-8 characters.
+local function truncateUtf8(str, max_bytes)
+    if #str <= max_bytes then return str end
+    local pos = 0
+    local i = 1
+    while i <= max_bytes do
+        local b = str:byte(i)
+        local char_len
+        if b < 0x80 then char_len = 1
+        elseif b < 0xE0 then char_len = 2
+        elseif b < 0xF0 then char_len = 3
+        else char_len = 4 end
+        if i + char_len - 1 > max_bytes then break end
+        pos = i + char_len - 1
+        i = i + char_len
+    end
+    return str:sub(1, pos) .. "..."
+end
+
+-- ─── Plugin ────────────────────────────────────────────────────────────────��──
+
 local Bookends = WidgetContainer:extend{
-    name = "bookends_and_dogends",
+    name        = "bookends_and_dogends",
     is_doc_only = true,
 }
 
 Bookends.POSITIONS = {
-    { key = "tl", label = _("Top-left"),      row = "top",    h_anchor = "left",   v_anchor = "top" },
-    { key = "tc", label = _("Top-center"),     row = "top",    h_anchor = "center", v_anchor = "top" },
-    { key = "tr", label = _("Top-right"),      row = "top",    h_anchor = "right",  v_anchor = "top" },
-    { key = "bl", label = _("Bottom-left"),    row = "bottom", h_anchor = "left",   v_anchor = "bottom" },
-    { key = "bc", label = _("Bottom-center"),  row = "bottom", h_anchor = "center", v_anchor = "bottom" },
-    { key = "br", label = _("Bottom-right"),   row = "bottom", h_anchor = "right",  v_anchor = "bottom" },
+    { key = "tl", label = _("Top-left"),     row = "top",    h_anchor = "left",   v_anchor = "top"    },
+    { key = "tc", label = _("Top-center"),   row = "top",    h_anchor = "center", v_anchor = "top"    },
+    { key = "tr", label = _("Top-right"),    row = "top",    h_anchor = "right",  v_anchor = "top"    },
+    { key = "bl", label = _("Bottom-left"),  row = "bottom", h_anchor = "left",   v_anchor = "bottom" },
+    { key = "bc", label = _("Bottom-center"),row = "bottom", h_anchor = "center", v_anchor = "bottom" },
+    { key = "br", label = _("Bottom-right"), row = "bottom", h_anchor = "right",  v_anchor = "bottom" },
 }
 
+-- Dogear settings keys
 local DOGEAR_S_ICON      = "bookends_dogear_icon"
 local DOGEAR_S_ICON_NAME = "bookends_dogear_icon_name"
 local DOGEAR_S_SCALE     = "bookends_dogear_scale"
@@ -43,6 +79,15 @@ local SEP = {
     text         = "\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80",
     enabled_func = function() return false end,
 }
+
+-- All per-line arrays that need to be kept in sync when lines are added/removed/swapped
+local LINE_ARRAYS = {
+    "line_style", "line_font_size", "line_font_face",
+    "line_v_nudge", "line_h_nudge", "line_uppercase",
+    "line_bar_height", "line_bar_manual_width",
+}
+
+-- ─── init ─────────────────────────────────────────────────────────────────────
 
 function Bookends:init()
     self:loadSettings()
@@ -66,6 +111,8 @@ end
 function Bookends:onReaderReady()
     self:patchReaderDogear()
 end
+
+-- ─── loadSettings ─────────────────────────────────────────────────────────────
 
 function Bookends:loadSettings()
     local footer_settings = self.ui.view.footer.settings
@@ -94,6 +141,7 @@ function Bookends:loadSettings()
     for _, pos in ipairs(self.POSITIONS) do
         local saved = G_reader_settings:readSetting("bookends_pos_" .. pos.key)
         if saved then
+            -- Migration: old format string → lines array
             if saved.format and saved.format ~= "" and not saved.lines then
                 saved.lines  = { saved.format }
                 saved.format = nil
@@ -106,7 +154,7 @@ function Bookends:loadSettings()
     end
 end
 
--- ─── Dogear scanning ─────────────────────────────────────
+-- ─── Dogear scanning ──────────────────────────────────────────────────────────
 
 function Bookends:getDogearPluginDir()
     return self.path .. "/icons"
@@ -137,7 +185,7 @@ function Bookends:scanDogearDesigns()
     return designs
 end
 
--- ─── Dogear monkey-patch ─────────────────────────────────
+-- ─── Dogear monkey-patch ──────────────────────────────────────────────────────
 
 function Bookends:patchReaderDogear()
     local ok, err = pcall(function()
@@ -262,7 +310,8 @@ function Bookends:resetDogear()
     G_reader_settings:delSetting(DOGEAR_S_MARGIN_R)
     self:applyDogearToLive()
 end
--- ─── Preset support ──────────────────────────────────────
+
+-- ─── Preset support ──────────────────────────────────���────────────────────────
 
 function Bookends:buildPreset()
     local util = require("util")
@@ -304,7 +353,7 @@ function Bookends:loadPreset(preset)
     self:markDirty()
 end
 
--- ─── Settings helpers ────────────────────────────────────
+-- ─── Settings helpers ─────────────────────────────────────────────────────────
 
 function Bookends:savePositionSetting(key)
     G_reader_settings:saveSetting("bookends_pos_" .. key, self.positions[key])
@@ -325,7 +374,7 @@ function Bookends:markDirty()
     UIManager:setDirty(self.ui, "ui")
 end
 
--- ─── Style helpers ───────────────────────────────────────
+-- ─── Style helpers ────────────────────────────────────────────────────────────
 
 Bookends.STYLES = { "regular", "bold", "italic", "bolditalic" }
 Bookends.STYLE_LABELS = {
@@ -358,7 +407,7 @@ function Bookends:resolveLineConfig(face_name, font_size, style, bar_height, bar
     }
 end
 
--- ─── Event handlers ──────────────────────────────────────
+-- ─── Event handlers ───────────────────────────────────────────────────────────
 
 function Bookends:onPageUpdate()
     local current = self.ui.view.state.page
@@ -376,9 +425,14 @@ end
 function Bookends:onPosUpdate()                    self:markDirty() end
 function Bookends:onReaderFooterVisibilityChange() self:markDirty() end
 function Bookends:onSetDimensions()                self:markDirty() end
-function Bookends:onResume()                       self:markDirty() end
 
--- ─── paintTo ─────────────────────────────────────────────
+function Bookends:onResume()
+    -- Reset session timer on wake so elapsed time excludes suspend periods
+    self.session_start_time = os.time()
+    self:markDirty()
+end
+
+-- ─── paintTo ──────────────────────────────────────────────────────────────────
 
 function Bookends:paintTo(bb, x, y)
     if not self.enabled then return end
@@ -389,7 +443,7 @@ function Bookends:paintTo(bb, x, y)
     local session_pages = math.max(0,
         (self.session_max_page or 0) - (self.session_start_page or 0))
 
-    -- Phase 1: Expand tokens
+    -- Phase 1: Expand tokens for all active positions
     local expanded = {}
     for _, pos in ipairs(self.POSITIONS) do
         if self:isPositionActive(pos.key) then
@@ -399,7 +453,7 @@ function Bookends:paintTo(bb, x, y)
         end
     end
 
-    -- Phase 2: Cache check
+    -- Phase 2: Cache check — skip rebuild if nothing changed
     if not self.dirty then
         local changed = false
         for key, text in pairs(expanded) do
@@ -419,7 +473,7 @@ function Bookends:paintTo(bb, x, y)
         end
     end
 
-    -- Phase 3: Build per-line configs and measure
+    -- Phase 3: Build per-line configs and measure text widths
     local measurements = {}
     for key, text in pairs(expanded) do
         local ps            = self.positions[key]
@@ -436,8 +490,9 @@ function Bookends:paintTo(bb, x, y)
             local bar_h  = (ps.line_bar_height       and ps.line_bar_height[i])       or default_bar_h
             local bar_mw = (ps.line_bar_manual_width and ps.line_bar_manual_width[i]) or nil
             local cfg    = self:resolveLineConfig(face, fsize, style, bar_h, bar_mw)
-            cfg.v_nudge  = (ps.line_v_nudge and ps.line_v_nudge[i]) or 0
-            cfg.h_nudge  = (ps.line_h_nudge and ps.line_h_nudge[i]) or 0
+            cfg.v_nudge  = (ps.line_v_nudge   and ps.line_v_nudge[i])   or 0
+            cfg.h_nudge  = (ps.line_h_nudge   and ps.line_h_nudge[i])   or 0
+            cfg.uppercase = (ps.line_uppercase and ps.line_uppercase[i]) or false
             table.insert(line_configs, cfg)
         end
 
@@ -445,7 +500,7 @@ function Bookends:paintTo(bb, x, y)
         measurements[key] = { width = w, line_configs = line_configs }
     end
 
-    -- Phase 4: Overlap limits and build widget cache
+    -- Phase 4: Overlap limits per row, then build and cache widgets
     local gap = self.defaults.overlap_gap
     if self.widget_cache then OverlayWidget.freeWidgets(self.widget_cache) end
     self.widget_cache = {}
@@ -498,6 +553,8 @@ function Bookends:paintTo(bb, x, y)
                         pos_def.h_anchor, pos_def.v_anchor,
                         w, h, screen_w, screen_h, v_off, h_off)
 
+                    -- Apply first-line nudge for single-line widgets
+                    -- (MultiLineWidget handles per-line nudges internally)
                     local cfg1 = m.line_configs[1]
                     if cfg1 and not widget.lines then
                         px = px + (cfg1.h_nudge or 0)
@@ -511,6 +568,7 @@ function Bookends:paintTo(bb, x, y)
         end
     end
 
+    -- Update cache state
     self.position_cache = {}
     for key, text in pairs(expanded) do self.position_cache[key] = text end
     self.dirty = false
@@ -522,11 +580,12 @@ function Bookends:onCloseWidget()
         self.widget_cache = nil
     end
 end
--- ─── Menu ─────��──────────────────────────────────────────
+
+-- ─── Menu ─────────────────────────────────────────────────────────────────────
 
 function Bookends:addToMainMenu(menu_items)
     menu_items.bookends_and_dogends = {
-        text = _("Bookends and Dogends"),
+        text           = _("Bookends and Dogends"),
         sorting_hint   = "typeset",
         sub_item_table = self:buildMainMenu(),
     }
@@ -543,8 +602,103 @@ function Bookends:buildMainMenu()
                 self:markDirty()
             end,
         },
+        -- Defaults submenu
+        {
+            text           = _("Defaults"),
+            enabled_func   = function() return self.enabled end,
+            sub_item_table = {
+                {
+                    text           = _("Default font"),
+                    sub_item_table = self:buildFontMenu(
+                        function() return self.defaults.font_face end,
+                        function(face)
+                            self.defaults.font_face = face
+                            G_reader_settings:saveSetting("bookends_font_face", face)
+                            self:markDirty()
+                        end),
+                },
+                {
+                    text           = _("Default font size"),
+                    keep_menu_open = true,
+                    callback       = function()
+                        self:showSpinner(_("Default font size"),
+                            self.defaults.font_size, 8, 36,
+                            self.ui.view.footer.settings.text_font_size,
+                            function(val)
+                                self.defaults.font_size = val
+                                G_reader_settings:saveSetting("bookends_font_size", val)
+                                self:markDirty()
+                            end)
+                    end,
+                },
+                {
+                    text           = _("Default progress bar height (px)"),
+                    keep_menu_open = true,
+                    callback       = function()
+                        self:showSpinner(_("Default progress bar height (px)"),
+                            self.defaults.bar_height, 2, 40, 8,
+                            function(val)
+                                self.defaults.bar_height = val
+                                G_reader_settings:saveSetting("bookends_bar_height", val)
+                                self:markDirty()
+                            end)
+                    end,
+                },
+                {
+                    text           = _("Default vertical offset"),
+                    keep_menu_open = true,
+                    callback       = function()
+                        self:showSpinner(_("Default vertical offset (px)"),
+                            self.defaults.v_offset, 0, 999, 35,
+                            function(val)
+                                self.defaults.v_offset = val
+                                G_reader_settings:saveSetting("bookends_v_offset", val)
+                                self:markDirty()
+                            end)
+                    end,
+                },
+                {
+                    text           = _("Default horizontal offset"),
+                    keep_menu_open = true,
+                    callback       = function()
+                        self:showSpinner(_("Default horizontal offset (px)"),
+                            self.defaults.h_offset, 0, 999, 18,
+                            function(val)
+                                self.defaults.h_offset = val
+                                G_reader_settings:saveSetting("bookends_h_offset", val)
+                                self:markDirty()
+                            end)
+                    end,
+                },
+                {
+                    text           = _("Overlap gap"),
+                    keep_menu_open = true,
+                    callback       = function()
+                        self:showSpinner(_("Minimum gap between texts (px)"),
+                            self.defaults.overlap_gap, 0, 100, 10,
+                            function(val)
+                                self.defaults.overlap_gap = val
+                                G_reader_settings:saveSetting("bookends_overlap_gap", val)
+                                self:markDirty()
+                            end)
+                    end,
+                },
+            },
+        },
+        -- Presets
+        {
+            text                = _("Presets"),
+            enabled_func        = function() return self.enabled end,
+            sub_item_table_func = function() return self:buildPresetsMenu() end,
+        },
+        -- Dogear
+        {
+            text                = _("Dogear (bookmark corner)"),
+            sub_item_table_func = function() return self:buildDogearMenu() end,
+        },
     }
 
+    -- Per-position entries
     for _, pos in ipairs(self.POSITIONS) do
         table.insert(menu, {
             text_func = function()
@@ -554,7 +708,7 @@ function Bookends:buildMainMenu()
                     self.session_start_time,
                     math.max(0, (self.session_max_page or 0) - (self.session_start_page or 0)))
                 if #lines > 1 then preview = preview .. " ..." end
-                if #preview > 40 then preview = preview:sub(1, 37) .. "..." end
+                if #preview > 40 then preview = truncateUtf8(preview, 37) end
                 return pos.label .. ": " .. preview
             end,
             enabled_func        = function() return self.enabled end,
@@ -562,104 +716,10 @@ function Bookends:buildMainMenu()
         })
     end
 
-    table.insert(menu, SEP)
-
-    table.insert(menu, {
-        text         = _("Default font"),
-        enabled_func = function() return self.enabled end,
-        sub_item_table = self:buildFontMenu(
-            function() return self.defaults.font_face end,
-            function(face)
-                self.defaults.font_face = face
-                G_reader_settings:saveSetting("bookends_font_face", face)
-                self:markDirty()
-            end),
-    })
-    table.insert(menu, {
-        text = _("Default font size"), keep_menu_open = true,
-        enabled_func = function() return self.enabled end,
-        callback = function()
-            self:showSpinner(_("Default font size"), self.defaults.font_size, 8, 36,
-                self.ui.view.footer.settings.text_font_size,
-                function(val)
-                    self.defaults.font_size = val
-                    G_reader_settings:saveSetting("bookends_font_size", val)
-                    self:markDirty()
-                end)
-        end,
-    })
-    table.insert(menu, {
-        text = _("Default progress bar height (px)"), keep_menu_open = true,
-        enabled_func = function() return self.enabled end,
-        callback = function()
-            self:showSpinner(_("Default progress bar height (px)"),
-                self.defaults.bar_height, 2, 40, 8,
-                function(val)
-                    self.defaults.bar_height = val
-                    G_reader_settings:saveSetting("bookends_bar_height", val)
-                    self:markDirty()
-                end)
-        end,
-    })
-    table.insert(menu, {
-        text = _("Default vertical offset"), keep_menu_open = true,
-        enabled_func = function() return self.enabled end,
-        callback = function()
-            self:showSpinner(_("Default vertical offset (px)"),
-                self.defaults.v_offset, 0, 999, 35,
-                function(val)
-                    self.defaults.v_offset = val
-                    G_reader_settings:saveSetting("bookends_v_offset", val)
-                    self:markDirty()
-                end)
-        end,
-    })
-    table.insert(menu, {
-        text = _("Default horizontal offset"), keep_menu_open = true,
-        enabled_func = function() return self.enabled end,
-        callback = function()
-            self:showSpinner(_("Default horizontal offset (px)"),
-                self.defaults.h_offset, 0, 999, 18,
-                function(val)
-                    self.defaults.h_offset = val
-                    G_reader_settings:saveSetting("bookends_h_offset", val)
-                    self:markDirty()
-                end)
-        end,
-    })
-    table.insert(menu, {
-        text = _("Overlap gap"), keep_menu_open = true,
-        enabled_func = function() return self.enabled end,
-        callback = function()
-            self:showSpinner(_("Minimum gap between texts (px)"),
-                self.defaults.overlap_gap, 0, 100, 10,
-                function(val)
-                    self.defaults.overlap_gap = val
-                    G_reader_settings:saveSetting("bookends_overlap_gap", val)
-                    self:markDirty()
-                end)
-        end,
-    })
-
-    table.insert(menu, SEP)
-    table.insert(menu, {
-        text                = _("Dogear (bookmark corner)"),
-        sub_item_table_func = function() return self:buildDogearMenu() end,
-    })
-    table.insert(menu, SEP)
-    table.insert(menu, {
-        text                = _("Presets"),
-        enabled_func        = function() return self.enabled end,
-        sub_item_table_func = function()
-            local Presets = require("ui/presets")
-            return Presets.genPresetMenuItemTable(self.preset_obj)
-        end,
-    })
-
     return menu
 end
 
--- ─── Dogear menu ─────────────────────────────────────────
+-- ─── Dogear menu ──────────────────────────────────────────────────────────────
 
 function Bookends:buildDogearMenu()
     local screen_min = math.min(Screen:getWidth(), Screen:getHeight())
@@ -698,6 +758,7 @@ function Bookends:buildDogearMenu()
             })
         end,
     })
+
     table.insert(menu, {
         text_func = function()
             local s = G_reader_settings:readSetting(DOGEAR_S_MARGIN_T) or 0
@@ -713,6 +774,7 @@ function Bookends:buildDogearMenu()
                 end)
         end,
     })
+
     table.insert(menu, {
         text_func = function()
             local s = G_reader_settings:readSetting(DOGEAR_S_MARGIN_R) or 0
@@ -730,11 +792,12 @@ function Bookends:buildDogearMenu()
     })
 
     table.insert(menu, SEP)
+
     table.insert(menu, {
         text     = _("Reset dogear to defaults"),
         callback = function()
-            self:resetDogear()
             local InfoMessage = require("ui/widget/infomessage")
+            self:resetDogear()
             UIManager:show(InfoMessage:new{ text = _("Dogear reset."), timeout = 2 })
         end,
     })
@@ -785,7 +848,157 @@ function Bookends:buildDogearIconMenu()
     return menu
 end
 
--- ─── Position menu ───────────────────────────────────────
+-- ─── Presets ──────────────────────────────────────────────────────────────────
+
+Bookends.BUILT_IN_PRESETS = {
+    {
+        name = _("Minimal"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = {} },
+                tr = { lines = {} },
+                bl = { lines = {} },
+                bc = { lines = { "Page %c of %t" }, line_font_size = { [1] = 16 }, v_offset = 35 },
+                br = { lines = {} },
+            },
+        },
+    },
+    {
+        name = _("Full status"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = { "%A \xE2\x8B\xAE %T" }, line_font_size = { [1] = 12 } },
+                tc = { lines = { "%k \xC2\xB7 %a %d" }, line_font_size = { [1] = 14 }, line_style = { [1] = "bold" } },
+                tr = { lines = { "%C" }, line_style = { [1] = "bold" } },
+                bl = { lines = { "\xE2\x8F\xB3 %R session" }, v_offset = 16 },
+                bc = { lines = { "Page %c of %t" }, line_font_size = { [1] = 16 }, v_offset = 35 },
+                br = { lines = { "%B %W" }, line_font_size = { [1] = 10 }, v_offset = 14 },
+            },
+        },
+    },
+    {
+        name = _("Book info"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = { "%T", "%A" }, line_style = { [1] = "bold", [2] = "italic" }, line_font_size = { [2] = 11 } },
+                tr = { lines = {} },
+                bl = { lines = {} },
+                bc = { lines = { "%c / %t (%p)" }, v_offset = 35 },
+                br = { lines = {} },
+            },
+        },
+    },
+    {
+        name = _("Chapter focus"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {} },
+                tc = { lines = { "%C" }, line_style = { [1] = "bold" } },
+                tr = { lines = {} },
+                bl = { lines = { "%g / %G (%P)" } },
+                bc = { lines = { "Page %c of %t" }, v_offset = 35 },
+                br = { lines = { "%h left" } },
+            },
+        },
+    },
+    {
+        name = _("Progress bars"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = { "%A \xE2\x8B\xAE %T" }, line_font_size = { [1] = 12 } },
+                tc = { lines = { "%k \xC2\xB7 %a %d" }, line_font_size = { [1] = 14 }, line_style = { [1] = "bold" } },
+                tr = { lines = { "%C" }, line_style = { [1] = "bold" } },
+                bl = { lines = { "%bar_chapter" }, v_offset = 16 },
+                bc = { lines = { "Page %c of %t" }, line_font_size = { [1] = 16 }, v_offset = 35 },
+                br = { lines = { "%bar_book" }, v_offset = 14 },
+            },
+        },
+    },
+    {
+        name = _("Token test"),
+        preset = {
+            enabled = true,
+            positions = {
+                tl = { lines = {
+                    "%T", "%A", "%S", "%C",
+                }, line_font_size = { [1] = 10, [2] = 10, [3] = 10, [4] = 10 } },
+                tc = { lines = {
+                    "%k \xC2\xB7 %K",
+                    "%d \xC2\xB7 %D",
+                    "%n \xC2\xB7 %w \xC2\xB7 %a",
+                }, line_font_size = { [1] = 10, [2] = 10, [3] = 10 } },
+                tr = { lines = {
+                    "%B %b \xC2\xB7 %W",
+                    "%m",
+                }, line_font_size = { [1] = 10, [2] = 10 } },
+                bl = { lines = {
+                    "%R session \xC2\xB7 %s pages",
+                    "%h ch \xC2\xB7 %H book",
+                }, line_font_size = { [1] = 10, [2] = 10 }, v_offset = 16 },
+                bc = { lines = {
+                    "Page %c of %t (%p)",
+                }, line_font_size = { [1] = 10 }, v_offset = 35 },
+                br = { lines = {
+                    "Ch: %g/%G (%P)",
+                    "Left: %l ch \xC2\xB7 %L book",
+                }, line_font_size = { [1] = 10, [2] = 10 }, v_offset = 14 },
+            },
+        },
+    },
+}
+
+function Bookends:buildPresetsMenu()
+    local Presets     = require("ui/presets")
+    local InfoMessage = require("ui/widget/infomessage")
+
+    local items = Presets.genPresetMenuItemTable(self.preset_obj)
+
+    local builtin_items = {
+        {
+            text         = "\xE2\x94\x80\xE2\x94\x80 " .. _("Built-in") .. " \xE2\x94\x80\xE2\x94\x80",
+            enabled_func = function() return false end,
+        },
+    }
+
+local loaded_msg = _("Preset '%1' loaded.")
+for _, bp in ipairs(self.BUILT_IN_PRESETS) do
+    local preset_name = tostring(bp.name)
+    local msg = loaded_msg:gsub("%%1", preset_name)
+    table.insert(builtin_items, {
+        text           = bp.name,
+        keep_menu_open = true,
+        callback       = function()
+            self:loadPreset(bp.preset)
+            UIManager:show(InfoMessage:new{
+                text    = msg,
+                timeout = 2,
+            })
+        end,
+    })
+end
+
+    for i = #builtin_items, 1, -1 do
+        table.insert(items, 2, builtin_items[i])
+    end
+
+    if #self.preset_obj.presets > 0 or next(self.preset_obj.presets) then
+        table.insert(items, 2 + #builtin_items, {
+            text         = "\xE2\x94\x80\xE2\x94\x80 " .. _("Your presets") .. " \xE2\x94\x80\xE2\x94\x80",
+            enabled_func = function() return false end,
+        })
+    end
+
+    return items
+end
+
+-- ─── Position menu ────────────────────────────────────────────────────────────
 
 function Bookends:buildPositionMenu(pos)
     local is_corner = pos.h_anchor ~= "center"
@@ -799,7 +1012,7 @@ function Bookends:buildPositionMenu(pos)
                     self.positions[pos.key].lines[idx] or "", self.ui,
                     self.session_start_time,
                     math.max(0, (self.session_max_page or 0) - (self.session_start_page or 0)))
-                if #preview > 45 then preview = preview:sub(1, 42) .. "..." end
+                if #preview > 45 then preview = truncateUtf8(preview, 42) end
                 return _("Line") .. " " .. idx .. ": " .. preview
             end,
             callback      = function() self:editLineString(pos, idx) end,
@@ -808,16 +1021,15 @@ function Bookends:buildPositionMenu(pos)
     end
 
     table.insert(menu, {
-        text     = _("Add line"),
+        text     = "+ " .. _("Add line") .. "  (" .. _("long press lines to manage") .. ")",
         callback = function()
             local idx = #self.positions[pos.key].lines + 1
             table.insert(self.positions[pos.key].lines, "")
             self:savePositionSetting(pos.key)
             self:editLineString(pos, idx)
         end,
+        separator = true,
     })
-
-    table.insert(menu, SEP)
 
     table.insert(menu, {
         text_func = function()
@@ -871,7 +1083,8 @@ function Bookends:buildPositionMenu(pos)
 
     return menu
 end
--- ─── Line editing ────────────────────────────────────────
+
+-- ��── Line editing ─────────────────────────────────────────────────────────────
 
 function Bookends:editLineString(pos, line_idx)
     local IconPicker   = require("icon_picker")
@@ -880,23 +1093,20 @@ function Bookends:editLineString(pos, line_idx)
     local current_text = pos_settings.lines[line_idx] or ""
 
     -- Ensure all per-line arrays exist
-    pos_settings.line_style            = pos_settings.line_style            or {}
-    pos_settings.line_font_size        = pos_settings.line_font_size        or {}
-    pos_settings.line_font_face        = pos_settings.line_font_face        or {}
-    pos_settings.line_v_nudge          = pos_settings.line_v_nudge          or {}
-    pos_settings.line_h_nudge          = pos_settings.line_h_nudge          or {}
-    pos_settings.line_bar_height       = pos_settings.line_bar_height       or {}
-    pos_settings.line_bar_manual_width = pos_settings.line_bar_manual_width or {}
+    for _, arr in ipairs(LINE_ARRAYS) do
+        pos_settings[arr] = pos_settings[arr] or {}
+    end
 
     local original_settings = util.tableDeepCopy(pos_settings)
 
-    local line_style   = pos_settings.line_style[line_idx]            or "regular"
-    local line_size    = pos_settings.line_font_size[line_idx]
-    local line_face    = pos_settings.line_font_face[line_idx]
-    local line_v_nudge = pos_settings.line_v_nudge[line_idx]          or 0
-    local line_h_nudge = pos_settings.line_h_nudge[line_idx]          or 0
-    local line_bar_h   = pos_settings.line_bar_height[line_idx]
-    local line_bar_mw  = pos_settings.line_bar_manual_width[line_idx] or 0
+    local line_style     = pos_settings.line_style[line_idx]            or "regular"
+    local line_size      = pos_settings.line_font_size[line_idx]
+    local line_face      = pos_settings.line_font_face[line_idx]
+    local line_v_nudge   = pos_settings.line_v_nudge[line_idx]          or 0
+    local line_h_nudge   = pos_settings.line_h_nudge[line_idx]          or 0
+    local line_uppercase = pos_settings.line_uppercase[line_idx]        or false
+    local line_bar_h     = pos_settings.line_bar_height[line_idx]
+    local line_bar_mw    = pos_settings.line_bar_manual_width[line_idx] or 0
 
     local nudge_step = 1
 
@@ -906,6 +1116,7 @@ function Bookends:editLineString(pos, line_idx)
         pos_settings.line_font_face[line_idx]        = line_face
         pos_settings.line_v_nudge[line_idx]          = line_v_nudge ~= 0 and line_v_nudge or nil
         pos_settings.line_h_nudge[line_idx]          = line_h_nudge ~= 0 and line_h_nudge or nil
+        pos_settings.line_uppercase[line_idx]        = line_uppercase or nil
         pos_settings.line_bar_height[line_idx]       = line_bar_h
         pos_settings.line_bar_manual_width[line_idx] = line_bar_mw ~= 0 and line_bar_mw or nil
         self:savePositionSetting(pos.key)
@@ -936,11 +1147,13 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             local cur = line_size or self:getPositionSetting(pos.key, "font_size")
             UIManager:show(SpinWidget:new{
-                value = cur, value_min = 8, value_max = 36,
+                value         = cur,
+                value_min     = 8,
+                value_max     = 36,
                 default_value = self:getPositionSetting(pos.key, "font_size"),
-                title_text = _("Font size for line") .. " " .. line_idx,
-                ok_text = _("Set"),
-                callback = function(spin)
+                title_text    = _("Font size for line") .. " " .. line_idx,
+                ok_text       = _("Set"),
+                callback      = function(spin)
                     line_size = spin.value
                     applyLivePreview()
                     format_dialog:reinit()
@@ -965,6 +1178,15 @@ function Bookends:editLineString(pos, line_idx)
         end,
     }
 
+    local case_button = {
+        text_func = function() return line_uppercase and "AA" or "Aa" end,
+        callback  = function()
+            line_uppercase = not line_uppercase
+            applyLivePreview()
+            format_dialog:reinit()
+        end,
+    }
+
     local bar_h_button = {
         text_func = function()
             return _("Bar h") .. ": " ..
@@ -973,11 +1195,13 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             local cur = line_bar_h or self.defaults.bar_height or 8
             UIManager:show(SpinWidget:new{
-                value = cur, value_min = 2, value_max = 40,
+                value         = cur,
+                value_min     = 2,
+                value_max     = 40,
                 default_value = self.defaults.bar_height or 8,
-                title_text = _("Bar height (px) for line") .. " " .. line_idx,
-                ok_text = _("Set"),
-                callback = function(spin)
+                title_text    = _("Bar height (px) for line") .. " " .. line_idx,
+                ok_text       = _("Set"),
+                callback      = function(spin)
                     line_bar_h = spin.value
                     applyLivePreview()
                     format_dialog:reinit()
@@ -1016,7 +1240,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_v_nudge = line_v_nudge - nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_down = {
@@ -1024,7 +1248,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_v_nudge = line_v_nudge + nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_left = {
@@ -1032,7 +1256,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_h_nudge = line_h_nudge - nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_right = {
@@ -1040,7 +1264,7 @@ function Bookends:editLineString(pos, line_idx)
         callback = function()
             format_dialog:onCloseKeyboard()
             line_h_nudge = line_h_nudge + nudge_step
-            applyLivePreview() ; format_dialog:reinit()
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
     local nudge_label = {
@@ -1050,22 +1274,10 @@ function Bookends:editLineString(pos, line_idx)
         end,
         callback = function()
             format_dialog:onCloseKeyboard()
-            line_v_nudge = 0 ; line_h_nudge = 0
-            applyLivePreview() ; format_dialog:reinit()
+            line_v_nudge = 0; line_h_nudge = 0
+            applyLivePreview(); format_dialog:reinit()
         end,
     }
-
-    local ARRAYS = {
-        "line_style", "line_font_size", "line_font_face",
-        "line_v_nudge", "line_h_nudge",
-        "line_bar_height", "line_bar_manual_width",
-    }
-
-    local function removeLineArrayEntries()
-        for _, arr in ipairs(ARRAYS) do
-            if pos_settings[arr] then table.remove(pos_settings[arr], line_idx) end
-        end
-    end
 
     format_dialog = InputDialog:new{
         title  = pos.label .. " \xE2\x80\x94 " .. _("Line") .. " " .. line_idx,
@@ -1080,8 +1292,11 @@ function Bookends:editLineString(pos, line_idx)
             end
         end,
         buttons = {
-            { style_button, size_button, font_button, bar_h_button, bar_mw_button },
+            -- Row 1: style / size / font / case / bar controls
+            { style_button, size_button, font_button, case_button, bar_h_button, bar_mw_button },
+            -- Row 2: position nudge
             { nudge_left, nudge_right, nudge_label, nudge_up, nudge_down },
+            -- Row 3: main actions
             {
                 {
                     text     = _("Cancel"),
@@ -1119,7 +1334,11 @@ function Bookends:editLineString(pos, line_idx)
                         local new_text = format_dialog:getInputText()
                         if new_text == "" then
                             table.remove(pos_settings.lines, line_idx)
-                            removeLineArrayEntries()
+                            for _, arr in ipairs(LINE_ARRAYS) do
+                                if pos_settings[arr] then
+                                    table.remove(pos_settings[arr], line_idx)
+                                end
+                            end
                         else
                             pos_settings.lines[line_idx] = new_text
                             applyLivePreview()
@@ -1135,18 +1354,14 @@ function Bookends:editLineString(pos, line_idx)
     UIManager:show(format_dialog)
     format_dialog:onShowKeyboard()
 end
--- ─── Line manage dialog (hold) ───────────────────────────
+
+-- ─── Line manage dialog (hold) ────────────────────────────────────────────────
 
 function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
     local ConfirmBox = require("ui/widget/confirmbox")
+    local T          = require("ffi/util").template
     local ps         = self.positions[pos.key]
     local num_lines  = #ps.lines
-    local T          = require("ffi/util").template
-    local ARRAYS     = {
-        "line_style", "line_font_size", "line_font_face",
-        "line_v_nudge", "line_h_nudge",
-        "line_bar_height", "line_bar_manual_width",
-    }
 
     local function refreshMenu()
         if touchmenu_instance then
@@ -1157,7 +1372,7 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
 
     local function removeLine()
         table.remove(ps.lines, line_idx)
-        for _, arr in ipairs(ARRAYS) do
+        for _, arr in ipairs(LINE_ARRAYS) do
             if ps[arr] then table.remove(ps[arr], line_idx) end
         end
         self:savePositionSetting(pos.key)
@@ -1167,7 +1382,7 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
 
     local function swapLines(a, b)
         ps.lines[a], ps.lines[b] = ps.lines[b], ps.lines[a]
-        for _, arr in ipairs(ARRAYS) do
+        for _, arr in ipairs(LINE_ARRAYS) do
             if ps[arr] then ps[arr][a], ps[arr][b] = ps[arr][b], ps[arr][a] end
         end
         self:savePositionSetting(pos.key)
@@ -1198,7 +1413,7 @@ function Bookends:showLineManageDialog(pos, line_idx, touchmenu_instance)
     })
 end
 
--- ─── Font picker ─────────────────────────────────────────
+-- ─── Font picker ──────────────────────────────────────────────────────────────
 
 function Bookends:showFontPicker(current_face, on_select)
     local Menu     = require("ui/widget/menu")
@@ -1232,7 +1447,7 @@ function Bookends:showFontPicker(current_face, on_select)
         math.floor((Screen:getHeight() - menu.dimen.h) / 2))
 end
 
--- ─── Token picker ────────────────────────────────────────
+-- ─── Token picker ─────────────────────────────────────────────────────────────
 
 Bookends.TOKEN_CATALOG = {
     { _("Metadata"), {
@@ -1242,16 +1457,16 @@ Bookends.TOKEN_CATALOG = {
         { "%C", _("Chapter title") },
     }},
     { _("Page / Progress"), {
-        { "%c", _("Current page number") },
-        { "%t", _("Total pages") },
-        { "%p", _("Book percentage read") },
-        { "%P", _("Chapter percentage read") },
-        { "%g", _("Pages read in chapter") },
-        { "%G", _("Total pages in chapter") },
-        { "%l", _("Pages left in chapter") },
-        { "%L", _("Pages left in book") },
-        { "%bar_book",    _("Book progress bar") },
-        { "%bar_chapter", _("Chapter progress bar") },
+        { "%c",          _("Current page number") },
+        { "%t",          _("Total pages") },
+        { "%p",          _("Book percentage read") },
+        { "%P",          _("Chapter percentage read") },
+        { "%g",          _("Pages read in chapter") },
+        { "%G",          _("Total pages in chapter") },
+        { "%l",          _("Pages left in chapter") },
+        { "%L",          _("Pages left in book") },
+        { "%bar_book",   _("Book progress bar") },
+        { "%bar_chapter",_("Chapter progress bar") },
     }},
     { _("Time / Date"), {
         { "%k", _("12-hour clock") },
@@ -1315,7 +1530,7 @@ function Bookends:showTokenPicker(on_select)
         math.floor((Screen:getHeight() - menu.dimen.h) / 2))
 end
 
--- ─── Helpers ─────────────────────────────────────────────
+-- ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function Bookends:buildFontMenu(get_current, on_select)
     local cre      = require("document/credocument"):engineInit()

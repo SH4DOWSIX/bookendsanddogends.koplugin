@@ -183,28 +183,18 @@ local function buildBarWidget(info, bar_w, bar_h)
     }
 end
 
--- bar_manual_width == 0 or nil → auto (caller supplies the resolved width)
--- bar_manual_width > 0         → exact pixel value
-local function resolveBarWidth(cfg, full_available_w, screen_w)
-    local mw = cfg.bar_manual_width
-    if mw and mw > 0 then
-        return math.max(4, mw), false  -- false = not auto
-    end
-    return math.max(4, full_available_w or screen_w or Screen:getWidth()), true  -- true = auto
-end
-
 -- Build a HorizontalRowWidget from an ordered list of segments on one line.
 -- segments: list of { kind="text", text=... } or { kind="bar", info=... }
 -- cfg: line config (face, bold, bar_height, bar_manual_width)
--- full_available_w: uncapped slot width for 0px bar resolution
+-- full_available_w: uncapped slot width for auto bar width resolution
 -- max_width: text truncation limit (nil = none)
 -- screen_w: fallback
 local function buildHorizontalRow(segments, cfg, full_available_w, max_width, screen_w)
     local bar_h = cfg.bar_height or 8
 
     -- First pass: build text widgets, identify auto-width bars
-    local built   = {}
-    local used_w  = 0
+    local built          = {}
+    local used_w         = 0
     local auto_bar_count = 0
 
     for _, seg in ipairs(segments) do
@@ -238,11 +228,12 @@ local function buildHorizontalRow(segments, cfg, full_available_w, max_width, sc
 
     -- Second pass: resolve auto-width bars equally from remaining space
     if auto_bar_count > 0 then
-        local remaining = math.max(4, (full_available_w or screen_w or Screen:getWidth()) - used_w)
-        local each      = math.max(4, math.floor(remaining / auto_bar_count))
+        local remaining = math.max(4,
+            (full_available_w or screen_w or Screen:getWidth()) - used_w)
+        local each = math.max(4, math.floor(remaining / auto_bar_count))
         for _, entry in ipairs(built) do
             if entry.kind == "bar_auto" then
-                local bar = buildBarWidget(entry.info, each, bar_h)
+                local bar    = buildBarWidget(entry.info, each, bar_h)
                 entry.kind   = "bar"
                 entry.widget = bar
                 entry.w      = each
@@ -267,7 +258,6 @@ local function buildHorizontalRow(segments, cfg, full_available_w, max_width, sc
     }
     return row, total_w, row_h
 end
-
 -- ─── Public API ───────────────────────────────────────────────────────────────
 
 --- Build a widget for a possibly multi-line, possibly bar-containing string.
@@ -277,7 +267,7 @@ end
 -- @param h_anchor      "left"|"center"|"right"
 -- @param max_width     number|nil  text truncation cap
 -- @param available_w   number|nil  slot width capped by overlap prevention
--- @param screen_w      number|nil  full uncapped slot width (for 0px bar resolution)
+-- @param screen_w      number|nil  full uncapped slot width (for auto bar width)
 function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, available_w, screen_w)
     screen_w = screen_w or Screen:getWidth()
 
@@ -338,7 +328,7 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
                     v_nudge = cfg.v_nudge or 0,
                     h_nudge = cfg.h_nudge or 0,
                 })
-                if rw > max_w  then max_w  = rw end
+                if rw > max_w then max_w = rw end
                 total_h = total_h + rh
             end
         else
@@ -375,6 +365,7 @@ function OverlayWidget.buildTextWidget(text, line_configs, h_anchor, max_width, 
 end
 
 --- Measure the pixel width of the widest text-only line (bars excluded).
+-- Used by main.lua for overlap prevention measurements.
 function OverlayWidget.measureTextWidth(text, line_configs)
     local max_w = 0
     local i     = 0
@@ -397,11 +388,13 @@ function OverlayWidget.measureTextWidth(text, line_configs)
 end
 
 --- Calculate max_width for each position in a row, applying overlap prevention.
+-- Center-first priority: center claims its natural width first, then sides
+-- get whatever remains. This matches your version's simplified approach.
 function OverlayWidget.calculateRowLimits(left_w, center_w, right_w, screen_w, gap, h_offset)
     local limits = { left = nil, center = nil, right = nil }
 
     if center_w then
-        local center_max = screen_w - 2 * gap
+        local center_max = math.max(0, screen_w - 2 * gap)
         if center_w > center_max then
             limits.center = center_max
             center_w      = center_max
@@ -409,7 +402,7 @@ function OverlayWidget.calculateRowLimits(left_w, center_w, right_w, screen_w, g
     end
 
     if center_w then
-        local available_side = math.floor((screen_w - center_w) / 2) - gap
+        local available_side = math.max(0, math.floor((screen_w - center_w) / 2) - gap)
         if left_w  and left_w  > available_side - h_offset then
             limits.left  = math.max(0, available_side - h_offset)
         end
@@ -423,11 +416,11 @@ function OverlayWidget.calculateRowLimits(left_w, center_w, right_w, screen_w, g
             if right_w > half - h_offset then limits.right = math.max(0, half - h_offset) end
         end
         if left_w and not right_w then
-            local max = screen_w - h_offset
+            local max = math.max(0, screen_w - h_offset)
             if left_w  > max then limits.left  = max end
         end
         if right_w and not left_w then
-            local max = screen_w - h_offset
+            local max = math.max(0, screen_w - h_offset)
             if right_w > max then limits.right = max end
         end
     end
